@@ -1,20 +1,4 @@
 #include "ffmpegplayer.h"
-
-FILE *fp_open=NULL;
-
-//Callback
-int FFmpegPlayer::ReadBuffer(void *opaque, uint8_t *buf, int buf_size){
-    FFmpegPlayer* player = (FFmpegPlayer*)opaque;
-
-    if(!feof(fp_open)){
-        int true_size=fread(buf,1,buf_size,fp_open);
-        return true_size;
-    }else{
-        return -1;
-    }
-
-}
-
 //Refresh Event
 #define SFM_REFRESH_EVENT  (SDL_USEREVENT + 1)
 
@@ -57,7 +41,7 @@ FFmpegPlayer::FFmpegPlayer()
     last_width = 0;
     last_height = 0;
 
-    main_thread = 0;
+    refresh_thread = 0;
 
     av_init_packet(&packet);
 
@@ -76,16 +60,15 @@ FFmpegPlayer::~FFmpegPlayer(){
         video_tid = NULL;
     }
 
-    if(main_thread != 0){
-        pthread_join(main_thread,NULL);
-        main_thread = 0;
+    if(refresh_thread != 0){
+        pthread_join(refresh_thread,NULL);
+        refresh_thread = 0;
     }
 
     SDL_Quit();
 }
 
 void FFmpegPlayer::Close(){
-    SDL_Quit();
     if(img_convert_ctx){
         sws_freeContext(img_convert_ctx);
         img_convert_ctx = NULL;
@@ -135,9 +118,7 @@ bool FFmpegPlayer::Open(){
         return false;
     }
 
-    //video_tid = SDL_CreateThread(&FFmpegPlayer::RefreshThreadFunc,NULL,this);
-    pthread_t h;
-    pthread_create(&h,NULL,RefreshThreadFuncWrap,this);
+    pthread_create(&refresh_thread,NULL,RefreshThreadFunc,this);
 }
 
 void FFmpegPlayer::ReInitScreen(){
@@ -306,40 +287,7 @@ int FFmpegPlayer::ShowImage(){
     return 0;
 }
 
-
-void* FFmpegPlayer::MainThreadFunc(void* param){
-    FFmpegPlayer* player = (FFmpegPlayer*)param;
-    for (;;) {
-        //Wait
-        SDL_Event event;
-        SDL_WaitEvent(&event);
-        if(event.type==SFM_REFRESH_EVENT){
-            if(player->ShowImage() < 0){
-                return NULL;
-            }
-        }
-        else if(event.type==SDL_KEYDOWN){
-            //Pause
-            if(event.key.keysym.sym==SDLK_SPACE){
-                player->thread_pause=!player->thread_pause;
-            }
-        }
-        else if(event.type==SDL_QUIT){
-            player->thread_exit=1;
-        }
-        else if(event.type==SFM_BREAK_EVENT){
-            break;
-        }
-    }
-    return NULL;
-}
-
-void* FFmpegPlayer::RefreshThreadFuncWrap(void* param){
-    RefreshThreadFunc(param);
-    return NULL;
-}
-
-int FFmpegPlayer::RefreshThreadFunc(void* param){
+void* FFmpegPlayer::RefreshThreadFunc(void* param){
     FFmpegPlayer* player = (FFmpegPlayer*)param;
     player->thread_exit=0;
     player->thread_pause=0;
@@ -377,5 +325,27 @@ void FFmpegPlayer::Write(uint8_t* data,uint32_t size){
 }
 
 void FFmpegPlayer::Start(){
-    MainThreadFunc(this);
+    for (;;) {
+        //Wait
+        SDL_Event event;
+        SDL_WaitEvent(&event);
+        if(event.type==SFM_REFRESH_EVENT){
+            if(ShowImage() < 0){
+                return ;
+            }
+        }
+        else if(event.type==SDL_KEYDOWN){
+            //Pause
+            if(event.key.keysym.sym==SDLK_SPACE){
+                thread_pause=!thread_pause;
+            }
+        }
+        else if(event.type==SDL_QUIT){
+            thread_exit=1;
+        }
+        else if(event.type==SFM_BREAK_EVENT){
+            break;
+        }
+    }
+    return ;
 }

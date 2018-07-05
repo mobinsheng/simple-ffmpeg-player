@@ -55,10 +55,7 @@ private:
     int ShowImage();
     void ReInitScreen();
 private:
-    static void* MainThreadFunc(void*);
-    static int RefreshThreadFunc(void*);  // sdl
-    static void* RefreshThreadFuncWrap(void*);
-    static int ReadBuffer(void *opaque, uint8_t *buf, int buf_size);
+    static void* RefreshThreadFunc(void*);
 private:
     AVCodecContext	*pCodecCtx;
     AVCodec			*pCodec;
@@ -79,7 +76,7 @@ private:
 
     struct SwsContext *img_convert_ctx;
 
-    pthread_t main_thread;
+    pthread_t refresh_thread;
 
     int thread_exit;
     int thread_pause;

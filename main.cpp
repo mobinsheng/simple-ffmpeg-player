@@ -266,7 +266,7 @@ int main(int argc, char* argv[]){
     //return test(argc,argv);
     FFmpegPlayer player;
     player.Open();
-    char filepath[]="/home/vcloud/resources/video/bitstream/1920x1080.h264";
+    char filepath[]="/home/vcloud/resources/video/bitstream/1280x720-640x360.h264";
     FILE* fp_in = fopen(filepath,"rb");
 
     while(!feof(fp_in)){
