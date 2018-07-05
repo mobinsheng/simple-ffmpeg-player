@@ -1,9 +1,4 @@
 #include "ffmpegplayer.h"
-//Refresh Event
-#define SFM_REFRESH_EVENT  (SDL_USEREVENT + 1)
-
-#define SFM_BREAK_EVENT  (SDL_USEREVENT + 2)
-
 FFmpegPlayer::FFmpegPlayer()
 {
     av_register_all();
@@ -17,7 +12,6 @@ FFmpegPlayer::FFmpegPlayer()
     pFrameYUV = 0;
     out_buffer = 0;
 
-
     screen_w = 0;
     screen_h = 0;
     screen = 0;
@@ -28,12 +22,8 @@ FFmpegPlayer::FFmpegPlayer()
 
     img_convert_ctx = 0;
 
-
     thread_exit=0;
     thread_pause=0;
-
-    pthread_mutex_init(&lock,NULL);
-    pthread_cond_init(&cond,NULL);
 
     cur_ptr = 0;
     cur_size = 0;
@@ -43,29 +33,11 @@ FFmpegPlayer::FFmpegPlayer()
 
     refresh_thread = 0;
 
-    av_init_packet(&packet);
-
-    if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER)) {
-        fprintf(stderr, "Could not initialize SDL - %s\n", SDL_GetError());
-        return;
-    }
+    running = true;
 }
 
 FFmpegPlayer::~FFmpegPlayer(){
     Close();
-    pthread_mutex_destroy(&lock);
-    pthread_cond_destroy(&cond);
-    if(video_tid){
-        SDL_WaitThread(video_tid,NULL);
-        video_tid = NULL;
-    }
-
-    if(refresh_thread != 0){
-        pthread_join(refresh_thread,NULL);
-        refresh_thread = 0;
-    }
-
-    SDL_Quit();
 }
 
 void FFmpegPlayer::Close(){
@@ -88,9 +60,57 @@ void FFmpegPlayer::Close(){
         avcodec_close(pCodecCtx);
         pCodecCtx = NULL;
     }
+
+    if(!running){
+        return;
+    }
+
+    running = false;
+
+    thread_exit = 1;
+
+    if(video_tid){
+        SDL_WaitThread(video_tid,NULL);
+        video_tid = NULL;
+    }
+
+    if(refresh_thread != 0){
+        pthread_join(refresh_thread,NULL);
+        refresh_thread = 0;
+    }
+
+    if(sdlTexture){
+        SDL_DestroyTexture(sdlTexture);
+        sdlTexture = NULL;
+    }
+
+    if(sdlRenderer){
+        SDL_DestroyRenderer(sdlRenderer);
+        sdlRenderer = NULL;
+    }
+
+    if(screen){
+        SDL_DestroyWindow(screen);
+        screen = NULL;
+    }
+
+    pthread_mutex_destroy(&lock);
+    pthread_cond_destroy(&cond);
+
+    //SDL_Quit();
 }
 
 bool FFmpegPlayer::Open(){
+    pthread_mutex_init(&lock,NULL);
+    pthread_cond_init(&cond,NULL);
+
+    if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER)) {
+        fprintf(stderr, "Could not initialize SDL - %s\n", SDL_GetError());
+        return false;
+    }
+
+    av_init_packet(&packet);
+
     pFrame=av_frame_alloc();
     pFrameYUV=av_frame_alloc();
 
@@ -198,21 +218,6 @@ void FFmpegPlayer::ReInitScreen(){
 int FFmpegPlayer::ShowImage(){
     bool bComplete = false;
     while (true) {
-        pthread_mutex_lock(&lock);
-        while (data_list.empty()) {
-            pthread_cond_wait(&cond,&lock);
-        }
-        cur_block = data_list[0];
-        data_list.pop_front();
-        pthread_mutex_unlock(&lock);
-
-        if(cur_block.size == 0){
-            return -1;
-        }
-
-        cur_size = cur_block.size;
-        cur_ptr = cur_block.data;
-
         while (cur_size) {
             int len = av_parser_parse2(
                         pCodecParserCtx, pCodecCtx,
@@ -236,14 +241,28 @@ int FFmpegPlayer::ShowImage(){
         if(cur_size == 0){
             cur_ptr = NULL;
 
-            delete[] cur_block.data;
-            cur_block.data = NULL;
-            cur_block.size = 0;
+            cur_block.clear();
         }
 
         if(bComplete){
             break;
         }
+
+        pthread_mutex_lock(&lock);
+        while (data_list.empty()) {
+            pthread_cond_wait(&cond,&lock);
+        }
+        cur_block = data_list[0];
+        data_list.pop_front();
+        pthread_mutex_unlock(&lock);
+
+        if(cur_block.size == 0){
+            cur_block.clear();
+            return -1;
+        }
+
+        cur_size = cur_block.size;
+        cur_ptr = cur_block.data;
     }
     int got_picture = 0;
     int ret = avcodec_decode_video2(pCodecCtx,
@@ -283,7 +302,6 @@ int FFmpegPlayer::ShowImage(){
         SDL_RenderPresent( sdlRenderer );
         //SDL End-----------------------
     }
-
     return 0;
 }
 
@@ -324,14 +342,15 @@ void FFmpegPlayer::Write(uint8_t* data,uint32_t size){
     pthread_mutex_unlock(&lock);
 }
 
-void FFmpegPlayer::Start(){
-    for (;;) {
-        //Wait
+void FFmpegPlayer::Run(){
+    while (true) {
         SDL_Event event;
         SDL_WaitEvent(&event);
+
         if(event.type==SFM_REFRESH_EVENT){
             if(ShowImage() < 0){
-                return ;
+                thread_exit=1;
+                break;
             }
         }
         else if(event.type==SDL_KEYDOWN){
@@ -342,10 +361,15 @@ void FFmpegPlayer::Start(){
         }
         else if(event.type==SDL_QUIT){
             thread_exit=1;
+            break;
         }
         else if(event.type==SFM_BREAK_EVENT){
+            thread_exit=1;
             break;
         }
     }
-    return ;
+}
+
+void FFmpegPlayer::Stop(){
+    Write(0,0);
 }

@@ -6,35 +6,34 @@
 
 #define __STDC_CONSTANT_MACROS
 
-#ifdef _WIN32
-//Windows
-extern "C"
-{
-#include "libavcodec/avcodec.h"
-#include "libavformat/avformat.h"
-#include "libswscale/swscale.h"
-#include "libavutil/imgutils.h"
-#include "SDL2/SDL.h"
-};
-#else
-//Linux...
 #ifdef __cplusplus
 extern "C"
 {
 #endif
+
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
 #include <libavutil/imgutils.h>
 #include <SDL2/SDL.h>
+
 #ifdef __cplusplus
 };
 #endif
-#endif
+
 
 struct DataBlock{
     DataBlock(){
         data = NULL;
+        size = 0;
+    }
+
+    void clear(){
+        if(data){
+            delete[] data;
+            data = NULL;
+        }
+
         size = 0;
     }
 
@@ -49,7 +48,8 @@ public:
     ~FFmpegPlayer();
     bool  Open(); // open player! not open a media file!
     void Write(uint8_t* data,uint32_t size);
-    void Start();
+    void Run();
+    void Stop();
     void Close(); // close player!
 private:
     int ShowImage();
@@ -57,13 +57,16 @@ private:
 private:
     static void* RefreshThreadFunc(void*);
 private:
+    enum{
+        SFM_REFRESH_EVENT = (SDL_USEREVENT + 1),
+        SFM_BREAK_EVENT = (SDL_USEREVENT + 2),
+    };
+
     AVCodecContext	*pCodecCtx;
     AVCodec			*pCodec;
     AVCodecParserContext *pCodecParserCtx;
     AVFrame	*pFrame,*pFrameYUV;
     unsigned char *out_buffer;
-
-
     //------------SDL----------------
     int screen_w,screen_h;
     SDL_Window *screen;
@@ -91,6 +94,8 @@ private:
 
     int last_width;
     int last_height;
+
+    bool running;
 };
 
 #endif // FFMPEGPLAYER_H
